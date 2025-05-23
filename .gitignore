@@ -1,0 +1,74 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.ppu
+*.a
+*.pdb
+*.compiled
+*.out
+*.rlib
+*.dSYM/
+
+# Free Pascal build files
+*.or
+*.rst
+*.s
+*.swp
+*.bak
+*.log
+*.map
+*.dbg
+*.res
+*.compiled
+*.cfg
+*.lst
+*.ppw
+*.ppc
+*.dcu
+*.dcp
+*.dpru
+*.dsk
+*.tds
+*.~*
+
+# Executables
+main
+test_server
+
+# Data and DB files
+data/
+*.db
+*.idx
+*.dat
+
+# Test output
+*.testoutput
+
+# Editor/OS files
+*~
+*.swp
+.DS_Store
+Thumbs.db
+
+# Lazarus/Delphi project files (на всякий случай)
+*.lps
+*.lpi
+*.lpr
+*.lpk
+*.dproj
+*.dof
+*.identcache
+*.tvsconfig
+*.local
+
+# Logs
+*.log
+
+# Backup
+*.bak
+
+# Ignore user config
+pkeydb.ini 
