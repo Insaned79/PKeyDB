@@ -59,7 +59,7 @@ curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 - [x] Configuration and logging
 - [x] Integration tests and shell script
 - [ ] Real file storage (index + mmap)
-- [ ] Secure authorization and token management
+- [x] Secure authorization and token management
 - [ ] Real-world load testing
 - [ ] Production-ready documentation and examples
 
@@ -120,7 +120,7 @@ curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 - [x] Конфигурирование и логирование
 - [x] Интеграционные тесты и shell-скрипт
 - [ ] Реальное файловое хранилище (индекс + mmap)
-- [ ] Безопасная авторизация и управление токенами
+- [x] Безопасная авторизация и управление токенами
 - [ ] Тестирование на реальной нагрузке
 - [ ] Документация и примеры для production
 
