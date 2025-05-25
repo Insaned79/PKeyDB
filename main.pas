@@ -17,7 +17,7 @@ begin
     Conf := LoadConfig(ConfigPath);
     WriteLn('Config loaded successfully:');
     PrintConfig(Conf);
-    StartServer(Conf.Address, Conf.Port);
+    StartServer(Conf);
   except
     on E: Exception do
     begin

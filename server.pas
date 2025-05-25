@@ -4,9 +4,9 @@ unit server;
 interface
 
 uses
-  SysUtils, fphttpapp, fphttpserver, httpdefs, classes, strutils, fpjson, jsonparser, DateUtils;
+  SysUtils, fphttpapp, fphttpserver, httpdefs, classes, strutils, fpjson, jsonparser, DateUtils, config, auth;
 
-procedure StartServer(const Address: string; Port: Integer);
+procedure StartServer(const Conf: TAppConfig);
 
 implementation
 
@@ -19,9 +19,11 @@ type
   TSimpleServer = class(TFPHTTPServer)
   private
     FDBs: TStringList; // name -> TDBMap
+    FConfig: TAppConfig;
     function GetDB(const DBName: string): TDBMap;
+    function FindDBConfig(const DBName: string): TDatabaseConfig;
   public
-    constructor Create(AOwner: TComponent); override;
+    constructor Create(AOwner: TComponent; const Conf: TAppConfig); reintroduce;
     destructor Destroy; override;
     procedure HandleRequest(Sender: TObject; var ARequest: TFPHTTPConnectionRequest; var AResponse: TFPHTTPConnectionResponse);
   end;
@@ -31,11 +33,12 @@ begin
   inherited Destroy;
 end;
 
-constructor TSimpleServer.Create(AOwner: TComponent);
+constructor TSimpleServer.Create(AOwner: TComponent; const Conf: TAppConfig);
 begin
   inherited Create(AOwner);
   FDBs := TStringList.Create;
   FDBs.OwnsObjects := True;
+  FConfig := Conf;
 end;
 
 destructor TSimpleServer.Destroy;
@@ -55,6 +58,15 @@ begin
   end
   else
     Result := TDBMap(FDBs.Objects[idx]);
+end;
+
+function TSimpleServer.FindDBConfig(const DBName: string): TDatabaseConfig;
+var i: Integer;
+begin
+  for i := 0 to High(FConfig.Databases) do
+    if FConfig.Databases[i].Name = DBName then
+      Exit(FConfig.Databases[i]);
+  raise Exception.Create('Database not found: ' + DBName);
 end;
 
 procedure WriteJSONResponse(var Resp: TFPHTTPConnectionResponse; const Code: Integer; const S: string);
@@ -86,6 +98,8 @@ var
   i, slashPos: Integer;
   JSONData: TJSONData;
   JSONObject: TJSONObject;
+  Password, JWT: string;
+  DBConf: TDatabaseConfig;
 begin
   Path := ARequest.URI;
   if AnsiStartsStr('/db/', Path) then
@@ -109,7 +123,7 @@ begin
     end;
     DB := GetDB(DBName);
     Token := ARequest.CustomHeaders.Values['X-Auth-Token'];
-    if (Token = '') and (not AnsiEndsStr('/auth', Path)) then
+    if not ValidateJWT(Token, FConfig.JwtSecret, DBName) then
     begin
       LogError('Unauthorized access to ' + Path);
       WriteJSONResponse(AResponse, 401, '{"error":"Unauthorized"}');
@@ -220,7 +234,49 @@ begin
   else if Path = '/auth' then
   begin
     LogInfo('AUTH request');
-    WriteJSONResponse(AResponse, 200, '{"token":"testtoken"}');
+    if (ARequest.Method <> 'POST') or (Pos('application/json', LowerCase(ARequest.ContentType)) = 0) then
+    begin
+      WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
+      Exit;
+    end;
+    try
+      JSONData := GetJSON(ARequest.Content);
+      if (JSONData.JSONType = jtObject) then
+      begin
+        JSONObject := TJSONObject(JSONData);
+        DBName := JSONObject.Get('dbname', '');
+        Password := JSONObject.Get('password', '');
+        if (DBName = '') or (Password = '') then
+        begin
+          WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
+          Exit;
+        end;
+        try
+          DBConf := FindDBConfig(DBName);
+        except
+          on E: Exception do
+          begin
+            WriteJSONResponse(AResponse, 404, '{"error":"Not found"}');
+            Exit;
+          end;
+        end;
+        if not CheckPassword(DBConf, Password) then
+        begin
+          WriteJSONResponse(AResponse, 401, '{"error":"Invalid credentials"}');
+          Exit;
+        end;
+        JWT := GenerateJWT(DBName, FConfig.JwtSecret, FConfig.JwtExpiry);
+        WriteJSONResponse(AResponse, 200, '{"token":"' + JWT + '"}');
+        Exit;
+      end;
+    except
+      on E: Exception do
+      begin
+        WriteJSONResponse(AResponse, 400, '{"error":"Bad JSON"}');
+        Exit;
+      end;
+    end;
+    WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
     Exit;
   end
   else
@@ -231,21 +287,20 @@ begin
   end;
 end;
 
-procedure StartServer(const Address: string; Port: Integer);
+procedure StartServer(const Conf: TAppConfig);
 var
   Server: TSimpleServer;
 begin
-  Server := TSimpleServer.Create(nil);
+  Server := TSimpleServer.Create(nil, Conf);
   try
     Server.OnRequest := @Server.HandleRequest;
     Server.Threaded := False;
     {$IFDEF FPC_HAS_FEATURE_ADDRESS}
-    Server.Address := Address;
+    Server.Address := Conf.Address;
     {$ENDIF}
-    Server.Port := Port;
-    WriteLn('Starting HTTP server at ', Address, ':', Port);
+    Server.Port := Conf.Port;
+    WriteLn('Starting HTTP server at ', Conf.Address, ':', Conf.Port);
     Server.Active := True;
-    // Run until Ctrl+C
     while Server.Active do
       Sleep(1000);
   finally

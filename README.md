@@ -52,6 +52,7 @@ curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 ### Documentation
 - [docs/api.md](docs/api.md) — REST API description, request examples
 - [docs/roadmap.md](docs/roadmap.md) — architecture and roadmap
+- `pkeydb.ini.example` — example config with comments
 
 ### Status
 - [x] Server and API skeleton
@@ -83,20 +84,17 @@ BSD 2-Clause. See [LICENSE](LICENSE).
 
 ## Быстрый старт
 
-1. **Сборка:**
+1. Склонируйте репозиторий и зависимости.
+2. Соберите проект через `make`.
+3. Скопируйте пример конфига:
    ```bash
-   fpc main.pas
+   cp pkeydb.ini.example pkeydb.ini
    ```
-2. **Запуск:**
-   ```bash
-   ./main pkeydb.ini
-   ```
-3. **Тестирование API:**
-   ```bash
-   ./test_server.sh
-   ```
+   и отредактируйте под свои нужды.
 
-## Пример запроса
+**ВАЖНО:** Ваш рабочий `pkeydb.ini` не коммитится в репозиторий. Для примера используйте `pkeydb.ini.example` (он всегда актуален и содержит комментарии по всем параметрам).
+
+### Пример запроса
 
 ```bash
 curl -X POST http://localhost:8080/auth -H 'Content-Type: application/json' -d '{"dbname":"db1","password":"mypassword"}'
@@ -104,7 +102,7 @@ curl -X POST http://localhost:8080/db/db1/set -H 'X-Auth-Token: <token>' -H 'Con
 curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 ```
 
-## Структура проекта
+### Структура проекта
 - `main.pas` — точка входа, запуск сервера
 - `server.pas` — HTTP сервер, обработка REST API
 - `config.pas` — парсер INI-файла
@@ -112,11 +110,12 @@ curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 - `test_server.sh` — shell-скрипт для тестирования API
 - `docs/` — документация (API, roadmap)
 
-## Документация
+### Документация
 - [docs/api.md](docs/api.md) — описание REST API, примеры запросов
 - [docs/roadmap.md](docs/roadmap.md) — архитектура и план разработки
+- `pkeydb.ini.example` — пример конфига с комментариями
 
-## Статус
+### Статус
 - [x] Каркас сервера и API
 - [x] Конфигурирование и логирование
 - [x] Интеграционные тесты и shell-скрипт
@@ -129,4 +128,11 @@ curl -X GET  http://localhost:8080/db/db1/get?key=foo -H 'X-Auth-Token: <token>'
 
 **Проект развивается!**
 
-Любые вопросы и предложения — через issues или pull requests. 
+Любые вопросы и предложения — через issues или pull requests.
+
+## Troubleshooting
+
+- **Не удаётся авторизоваться:**
+  - Проверьте, что в конфиге указан SHA256-хэш пароля, а не plain-текст.
+  - Проверьте, что хэш в нижнем регистре, без пробелов.
+  - Проверьте, что сервер перезапущен после изменения конфига. 

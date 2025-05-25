@@ -31,6 +31,8 @@ begin
     PrintConfig(Conf);
     AssertEqual('Address', Conf.Address, '127.0.0.1');
     AssertEqualInt('Port', Conf.Port, 8080);
+    AssertEqual('jwt_secret', Conf.JwtSecret, 'supersecretkey');
+    AssertEqualInt('jwt_expiry', Conf.JwtExpiry, 60);
     AssertEqualInt('Databases count', Length(Conf.Databases), 2);
     if Length(Conf.Databases) > 0 then
     begin

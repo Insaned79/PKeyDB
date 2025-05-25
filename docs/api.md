@@ -26,25 +26,36 @@
 [server]
 address=0.0.0.0
 port=8080
+jwt_secret=supersecretkey
+jwt_expiry=60
 
 [databases]
 db1.path=data/db1.db
-db1.password=hash1
+db1.password=5b11618c2e44027877d0cd0921ed166b9f176f50587fc91e7534dd2946db77d6  # SHA256("secret1")
 db1.limit=10485760
 db1.limit_action=rotate
 db2.path=data/db2.db
-db2.password=hash2
+db2.password=... # SHA256("secret2")
 db2.limit=none
 db2.limit_action=error
 ```
 
-- **[server]** — параметры сервера (address, port)
-- **[databases]** — список БД, для каждой: путь, пароль (SHA256-хэш), лимит (в байтах или none), действие при превышении лимита
-- **limit_action** — определяет поведение при превышении лимита:
-    - `error` (по умолчанию) — при попытке записи сверх лимита возвращается ошибка 413
-    - `rotate` — при достижении лимита автоматически удаляются самые старые записи, пока размер базы не станет меньше лимита, затем новая запись добавляется. Если невозможно освободить место — возвращается ошибка 413.
+- **[server]** — параметры сервера (address, port, jwt_secret, jwt_expiry)
+- **[databases]** — список БД, для каждой: путь, пароль (**SHA256-хэш!**), лимит (в байтах или none), действие при превышении лимита
+- **ВАЖНО:** Пароль в конфиге — это **SHA256-хэш** строки-пароля в hex (нижний регистр, без пробелов). Не указывайте plain-текст!
 
-> **Важно!** Если параметр `limit_action` не задан, используется `error`.
+### Как получить SHA256-хэш пароля
+
+В Linux/macOS:
+```
+echo -n "yourpassword" | sha256sum
+```
+В Windows (PowerShell):
+```
+echo -n "yourpassword" | openssl dgst -sha256
+```
+
+Вставьте полученный hex-хэш в конфиг как значение `dbN.password`.
 
 ---
 
@@ -88,7 +99,7 @@ db2.limit_action=error
   ```
 - Ответ (успех):
   ```json
-  { "token": "abcdef123456..." }
+  { "token": "<jwt>" }
   ```
 - Ответ (ошибка):
   ```json
@@ -101,9 +112,9 @@ db2.limit_action=error
 
 **Использование токена:**
 - Для всех операций с БД добавляйте заголовок:
-  X-Auth-Token: <token>
+  X-Auth-Token: <jwt>
 
-> **Безопасность:** Токен даёт полный доступ к базе, включая возможность её полной очистки. Не передавайте токен третьим лицам.
+> **Безопасность:** Токен — это JWT (HS256, claim sub=имя БД, exp=60 минут, iss=PKeyDB, jti). Секрет для подписи хранится в конфиге (jwt_secret). После истечения срока действия требуется повторная авторизация. Токен даёт полный доступ только к одной БД (sub).
 
 ---
 
@@ -111,7 +122,7 @@ db2.limit_action=error
 
 #### 1. Создать/обновить ключ
 **POST /db/{dbname}/set**
-- Заголовок: X-Auth-Token: <token>
+- Заголовок: X-Auth-Token: <jwt>
 - Тело запроса (JSON):
   ```json
   { "key": "mykey", "value": "myvalue" }
@@ -132,12 +143,12 @@ db2.limit_action=error
   (база автоматически очищена, запись выполнена)
 - Пример curl:
   ```bash
-  curl -X POST http://localhost:8080/db/db1/set -H 'X-Auth-Token: <token>' -H 'Content-Type: application/json' -d '{"key":"foo","value":"bar"}'
+  curl -X POST http://localhost:8080/db/db1/set -H 'X-Auth-Token: <jwt>' -H 'Content-Type: application/json' -d '{"key":"foo","value":"bar"}'
   ```
 
 #### 2. Получить значение по ключу
 **GET /db/{dbname}/get?key=...**
-- Заголовок: X-Auth-Token: <token>
+- Заголовок: X-Auth-Token: <jwt>
 - Ответ (успех):
   ```json
   { "key": "foo", "value": "bar" }
@@ -148,12 +159,12 @@ db2.limit_action=error
   ```
 - Пример curl:
   ```bash
-  curl -X GET 'http://localhost:8080/db/db1/get?key=foo' -H 'X-Auth-Token: <token>'
+  curl -X GET 'http://localhost:8080/db/db1/get?key=foo' -H 'X-Auth-Token: <jwt>'
   ```
 
 #### 3. Удалить ключ
 **DELETE /db/{dbname}/del?key=...**
-- Заголовок: X-Auth-Token: <token>
+- Заголовок: X-Auth-Token: <jwt>
 - Ответ (успех):
   ```json
   { "result": "deleted" }
@@ -164,24 +175,24 @@ db2.limit_action=error
   ```
 - Пример curl:
   ```bash
-  curl -X DELETE 'http://localhost:8080/db/db1/del?key=foo' -H 'X-Auth-Token: <token>'
+  curl -X DELETE 'http://localhost:8080/db/db1/del?key=foo' -H 'X-Auth-Token: <jwt>'
   ```
 
 #### 4. Список ключей (опционально)
 **GET /db/{dbname}/list**
-- Заголовок: X-Auth-Token: <token>
+- Заголовок: X-Auth-Token: <jwt>
 - Ответ (успех):
   ```json
   { "keys": ["foo", "bar", ...] }
   ```
 - Пример curl:
   ```bash
-  curl -X GET 'http://localhost:8080/db/db1/list' -H 'X-Auth-Token: <token>'
+  curl -X GET 'http://localhost:8080/db/db1/list' -H 'X-Auth-Token: <jwt>'
   ```
 
 #### 5. Полная очистка базы
 **POST /db/{dbname}/clear**
-- Заголовок: X-Auth-Token: <token>
+- Заголовок: X-Auth-Token: <jwt>
 - Ответ (успех):
   ```json
   { "result": "cleared" }
@@ -196,7 +207,7 @@ db2.limit_action=error
   ```
 - Пример curl:
   ```bash
-  curl -X POST http://localhost:8080/db/db1/clear -H 'X-Auth-Token: <token>'
+  curl -X POST http://localhost:8080/db/db1/clear -H 'X-Auth-Token: <jwt>'
   ```
 
 > **Внимание!** Операция очистки базы необратима: все данные будут удалены без возможности восстановления.
@@ -209,7 +220,7 @@ db2.limit_action=error
 |-----|-------------------------|--------------------------------|
 | 200 | OK                      | { "result": "ok" }            |
 | 400 | Неверные параметры      | { "error": "Bad request" }     |
-| 401 | Нет/неверный токен      | { "error": "Unauthorized" }    |
+| 401 | Нет/неверный/просроченный токен | { "error": "Unauthorized" }    |
 | 404 | Ключ/БД не найдены      | { "error": "Not found" }       |
 | 413 | Превышен лимит          | { "error": "Limit exceeded" }  |
 | 500 | Внутренняя ошибка       | { "error": "Internal error" }  |
@@ -246,8 +257,11 @@ db2.limit_action=error
 
 ## FAQ
 
+**Q:** Почему не удаётся авторизоваться, даже если пароль верный?
+**A:** В конфиге должен быть SHA256-хэш пароля, а не сам пароль. Проверьте, что хэш совпадает с тем, что выдаёт команда выше, и что он в нижнем регистре, без пробелов.
+
 **Q:** Как сменить пароль для БД?
-**A:** Измените поле password в конфиге (SHA256-хэш), перезапустите сервер.
+**A:** Получите новый SHA256-хэш нужной строки и замените значение `password` в конфиге, затем перезапустите сервер.
 
 **Q:** Как добавить новую БД?
 **A:** Добавьте параметры dbN.path, dbN.password, dbN.limit, dbN.limit_action в секцию [databases], **файлы базы будут созданы автоматически при первом обращении**, перезапустите сервер.
@@ -275,22 +289,22 @@ curl -X POST http://localhost:8080/auth -H 'Content-Type: application/json' -d '
 
 ### Запись значения
 ```bash
-curl -X POST http://localhost:8080/db/db1/set -H 'X-Auth-Token: <token>' -H 'Content-Type: application/json' -d '{"key":"foo","value":"bar"}'
+curl -X POST http://localhost:8080/db/db1/set -H 'X-Auth-Token: <jwt>' -H 'Content-Type: application/json' -d '{"key":"foo","value":"bar"}'
 ```
 
 ### Получение значения
 ```bash
-curl -X GET 'http://localhost:8080/db/db1/get?key=foo' -H 'X-Auth-Token: <token>'
+curl -X GET 'http://localhost:8080/db/db1/get?key=foo' -H 'X-Auth-Token: <jwt>'
 ```
 
 ### Удаление ключа
 ```bash
-curl -X DELETE 'http://localhost:8080/db/db1/del?key=foo' -H 'X-Auth-Token: <token>'
+curl -X DELETE 'http://localhost:8080/db/db1/del?key=foo' -H 'X-Auth-Token: <jwt>'
 ```
 
 ### Очистка базы
 ```bash
-curl -X POST http://localhost:8080/db/db1/clear -H 'X-Auth-Token: <token>'
+curl -X POST http://localhost:8080/db/db1/clear -H 'X-Auth-Token: <jwt>'
 ```
 
 ---

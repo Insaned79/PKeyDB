@@ -18,6 +18,8 @@ type
   TAppConfig = record
     Address: string;
     Port: Integer;
+    JwtSecret: string;
+    JwtExpiry: Integer;
     Databases: array of TDatabaseConfig;
   end;
 
@@ -54,6 +56,8 @@ begin
   try
     ResultConfig.Address := Ini.ReadString('server', 'address', '0.0.0.0');
     ResultConfig.Port := Ini.ReadInteger('server', 'port', 8080);
+    ResultConfig.JwtSecret := Ini.ReadString('server', 'jwt_secret', '');
+    ResultConfig.JwtExpiry := Ini.ReadInteger('server', 'jwt_expiry', 60);
 
     // Parse databases
     AllKeys := TStringList.Create;
@@ -96,6 +100,11 @@ var
   i: Integer;
 begin
   WriteLn('Server: ', Conf.Address, ':', Conf.Port);
+  if Conf.JwtSecret <> '' then
+    WriteLn('JWT secret: [set, length=', Length(Conf.JwtSecret), ']')
+  else
+    WriteLn('JWT secret: [not set]');
+  WriteLn('JWT expiry: ', Conf.JwtExpiry, ' min');
   WriteLn('Databases: ', Length(Conf.Databases));
   for i := 0 to High(Conf.Databases) do
   begin

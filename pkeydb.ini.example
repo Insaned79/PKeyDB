@@ -1,0 +1,19 @@
+[server]
+address=127.0.0.1         # IP-адрес для прослушивания
+port=8080                 # Порт сервера
+jwt_secret=supersecretkey # Секрет для подписи JWT (любой длинный строковый ключ)
+jwt_expiry=60             # Срок жизни токена (минуты)
+
+[databases]
+db1.path=data/db1.db      # Путь к файлу БД
+# SHA256("secret1") = 5b11618c2e44027877d0cd0921ed166b9f176f50587fc91e7534dd2946db77d6
+db1.password=5b11618c2e44027877d0cd0921ed166b9f176f50587fc91e7534dd2946db77d6
+# Лимит размера БД в байтах (или none)
+db1.limit=10485760
+# Действие при превышении лимита: error (ошибка) или rotate (удалять старые)
+db1.limit_action=rotate
+
+db2.path=data/db2.db
+# SHA256("secret2") = 6bb4837eb74329105ee4568dda7dc67ed2ca2ad9b6c8f0a6c531a6a100f7ad94
+db2.password=6bb4837eb74329105ee4568dda7dc67ed2ca2ad9b6c8f0a6c531a6a100f7ad94
+db2.limit=none 
