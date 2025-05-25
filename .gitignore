@@ -1,16 +1,20 @@
-# Binaries
-*.exe
-*.dll
-*.so
-*.dylib
+# IDE
+.vscode/
+
+# Бинарники и объектные файлы
 *.o
 *.ppu
-*.a
-*.pdb
-*.compiled
-*.out
-*.rlib
-*.dSYM/
+*.exe
+test_storage
+test_config
+
+# Тестовые и временные файлы
+*.bin
+test.idx*
+test.dat*
+test_bucket.bin
+test_dir.bin
+test_server_output*.txt
 
 # Free Pascal build files
 *.or
