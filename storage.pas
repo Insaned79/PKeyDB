@@ -79,7 +79,7 @@ function DirectoryIndexByHash(hash: QWord; global_depth: Byte): Integer;
 function FindRecordInBucket(const bucket: PBucket; key_hash: QWord; const key_data: array of Byte; key_size: Word): Integer;
 function AddRecordToBucket(bucket: PBucket; const rec: TBucketRecord; max_records: Integer): Boolean;
 function DeleteRecordInBucket(bucket: PBucket; key_hash: QWord; const key_data: array of Byte; key_size: Word): Boolean;
-function SplitBucket(bucket: PBucket; local_depth: Byte; max_records: Integer): TSplitResult;
+function SplitBucket(bucket: PBucket; local_depth: Byte; max_records: Integer): PBucket;
 procedure GrowDirectoryIfNeeded(var dir: TDirectory; new_local_depth: Byte);
 function InsertWithSplit(var dir: TDirectory; var buckets: TBucketPtrArray; const rec: TBucketRecord; max_records: Integer): Boolean;
 
@@ -298,9 +298,9 @@ begin
     Result := False;
 end;
 
-function SplitBucket(bucket: PBucket; local_depth: Byte; max_records: Integer): TSplitResult;
+function SplitBucket(bucket: PBucket; local_depth: Byte; max_records: Integer): PBucket;
 var
-  i, n, mask, idx, j: Integer;
+  i, mask, idx, j: Integer;
   recs_keep, recs_move: array of TBucketRecord;
   logf: Text;
 begin
@@ -341,22 +341,12 @@ begin
   SetLength(bucket^.records, bucket^.num_records);
   for i := 0 to High(recs_keep) do
     bucket^.records[i] := recs_keep[i];
-  New(Result.new_bucket);
-  Result.new_bucket^ := InitBucket(local_depth);
-  Result.new_bucket^.num_records := Length(recs_move);
-  SetLength(Result.new_bucket^.records, Result.new_bucket^.num_records);
+  New(Result);
+  Result^ := InitBucket(local_depth);
+  Result^.num_records := Length(recs_move);
+  SetLength(Result^.records, Result^.num_records);
   for i := 0 to High(recs_move) do
-    Result.new_bucket^.records[i] := recs_move[i];
-  n := 1 shl local_depth;
-  SetLength(Result.new_indexes, 0);
-  for i := 0 to n-1 do
-    if (i and mask) <> 0 then
-    begin
-      idx := Length(Result.new_indexes);
-      SetLength(Result.new_indexes, idx+1);
-      Result.new_indexes[idx] := i;
-    end;
-  WriteLn(logf, '[DEBUG][SplitBucket] done, recs_keep=', Length(recs_keep), ' recs_move=', Length(recs_move), ' new_indexes.count=', Length(Result.new_indexes));
+    Result^.records[i] := recs_move[i];
   // Логируем содержимое новых бакетов после split
   WriteLn(logf, '[DEBUG][SplitBucket] keys in recs_keep (remain in old bucket):');
   for i := 0 to High(recs_keep) do
@@ -375,6 +365,7 @@ begin
   // Защита: split неудачен, если один из бакетов пустой
   if (Length(recs_keep) = 0) or (Length(recs_move) = 0) then
     WriteLn(logf, '[DEBUG][SplitBucket] WARNING: split ineffective, all records in one bucket!');
+  WriteLn(logf, '[DEBUG][SplitBucket] done');
   CloseFile(logf);
 end;
 
@@ -414,12 +405,13 @@ end;
 function InsertWithSplit(var dir: TDirectory; var buckets: TBucketPtrArray; const rec: TBucketRecord; max_records: Integer): Boolean;
 var
   idx, bidx, i, new_bidx: Integer;
-  split_res: TSplitResult;
+  split_res: PBucket;
   local_depth: Byte;
   logf: Text;
   split_attempts: Integer;
   max_depth: Integer;
   split_effective: Boolean;
+  split_mask: Integer;
 begin
   AssignFile(logf, 'storage_set_debug.log');
   if FileExists('storage_set_debug.log') then
@@ -427,6 +419,10 @@ begin
   else
     Rewrite(logf);
   WriteLn(logf, '[DEBUG][InsertWithSplit] called, dir.global_depth=', dir.global_depth, ' buckets.count=', Length(buckets));
+  WriteLn(logf, '[DEBUG][InsertWithSplit] bucket_offsets before split:');
+  for i := 0 to High(dir.bucket_offsets) do
+    Write(logf, dir.bucket_offsets[i], ' ');
+  WriteLn(logf);
   split_attempts := 0;
   max_depth := 20; // разумный предел глубины
   while split_attempts < max_depth do
@@ -444,8 +440,12 @@ begin
     local_depth := buckets[bidx]^.local_depth + 1;
     WriteLn(logf, '[DEBUG][InsertWithSplit] splitting bucket bidx=', bidx, ' to local_depth=', local_depth);
     split_res := SplitBucket(buckets[bidx], local_depth, max_records);
-    WriteLn(logf, '[DEBUG][InsertWithSplit] SplitBucket done, new_bucket local_depth=', split_res.new_bucket^.local_depth, ' new_indexes.count=', Length(split_res.new_indexes));
-    split_effective := (buckets[bidx]^.num_records > 0) and (split_res.new_bucket^.num_records > 0);
+    WriteLn(logf, '[DEBUG][InsertWithSplit] SplitBucket done, new_bucket local_depth=', split_res^.local_depth);
+    WriteLn(logf, '[DEBUG][InsertWithSplit] bucket_offsets after split:');
+    for i := 0 to High(dir.bucket_offsets) do
+      Write(logf, dir.bucket_offsets[i], ' ');
+    WriteLn(logf);
+    split_effective := (buckets[bidx]^.num_records > 0) and (split_res^.num_records > 0);
     if not split_effective then
     begin
       WriteLn(logf, '[DEBUG][InsertWithSplit] Split ineffective, force grow directory. split_attempts=', split_attempts);
@@ -455,15 +455,16 @@ begin
     end;
     new_bidx := Length(buckets);
     SetLength(buckets, new_bidx + 1);
-    buckets[new_bidx] := split_res.new_bucket;
+    buckets[new_bidx] := split_res;
     WriteLn(logf, '[DEBUG][InsertWithSplit] buckets resized, new_bidx=', new_bidx, ' buckets.count=', Length(buckets));
     GrowDirectoryIfNeeded(dir, local_depth);
     WriteLn(logf, '[DEBUG][InsertWithSplit] after GrowDirectoryIfNeeded, dir.global_depth=', dir.global_depth, ' bucket_offsets.count=', Length(dir.bucket_offsets));
-    for i := 0 to High(split_res.new_indexes) do
-      if dir.bucket_offsets[split_res.new_indexes[i]] = bidx then
+    split_mask := 1 shl (local_depth - 1);
+    for i := 0 to High(dir.bucket_offsets) do
+      if (dir.bucket_offsets[i] = bidx) and ((i and split_mask) <> 0) then
       begin
-        WriteLn(logf, '[DEBUG][InsertWithSplit] redirecting bucket_offset[', split_res.new_indexes[i], '] from ', bidx, ' to ', new_bidx);
-        dir.bucket_offsets[split_res.new_indexes[i]] := new_bidx;
+        WriteLn(logf, '[DEBUG][InsertWithSplit] redirecting bucket_offset[', i, '] from ', bidx, ' to ', new_bidx);
+        dir.bucket_offsets[i] := new_bidx;
       end;
     idx := DirectoryIndexByHash(rec.key_hash, dir.global_depth);
     bidx := dir.bucket_offsets[idx];
@@ -717,9 +718,10 @@ begin
   rec.data_size := Length(value);
   rec.deleted := 0;
   rec.timestamp := GetUnixTime;
-  WriteLn(logf, '[DEBUG][StorageSet] try AddRecordToBucket');
+  WriteLn(logf, '[DEBUG][StorageSet] BEFORE: idx=', idx, ' bucket_offsets[idx]=', storage.directory.bucket_offsets[idx]);
   if AddRecordToBucket(bucket, rec, MAX_RECORDS_PER_BUCKET) then
   begin
+    WriteLn(logf, '[DEBUG][StorageSet] AFTER: idx=', idx, ' bucket_offsets[idx]=', storage.directory.bucket_offsets[idx]);
     SaveBucketToFile(bucket^, storage.idx_filename + '.bucket' + IntToStr(bidx));
     SaveDirectoryToFile(storage.directory, storage.idx_filename);
     WriteLn(logf, '[DEBUG][StorageSet] AddRecordToBucket success');
@@ -736,7 +738,15 @@ begin
     Exit;
   end;
   WriteLn(logf, '[DEBUG][StorageSet] InsertWithSplit success, CompactBuckets');
+  WriteLn(logf, '[DEBUG][StorageSet] bucket_offsets after InsertWithSplit:');
+  for i := 0 to High(storage.directory.bucket_offsets) do
+    Write(logf, storage.directory.bucket_offsets[i], ' ');
+  WriteLn(logf);
   CompactBuckets(storage.directory, storage.buckets, storage.idx_filename);
+  WriteLn(logf, '[DEBUG][StorageSet] bucket_offsets after CompactBuckets:');
+  for i := 0 to High(storage.directory.bucket_offsets) do
+    Write(logf, storage.directory.bucket_offsets[i], ' ');
+  WriteLn(logf);
   SaveDirectoryToFile(storage.directory, storage.idx_filename);
   for idx := 0 to High(storage.buckets) do
     SaveBucketToFile(storage.buckets[idx]^, storage.idx_filename + '.bucket' + IntToStr(idx));
@@ -841,6 +851,14 @@ begin
     end;
     WriteLn(logf);
   end;
+  WriteLn(logf, '[DEBUG][CompactBuckets] bucket_offsets before:');
+  for i := 0 to High(dir.bucket_offsets) do
+    Write(logf, dir.bucket_offsets[i], ' ');
+  WriteLn(logf);
+  WriteLn(logf, '[DEBUG][CompactBuckets] bucket_offsets after:');
+  for i := 0 to High(dir.bucket_offsets) do
+    Write(logf, dir.bucket_offsets[i], ' ');
+  WriteLn(logf);
   CloseFile(logf);
 end;
 
