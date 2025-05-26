@@ -4,23 +4,23 @@ unit server;
 interface
 
 uses
-  SysUtils, fphttpapp, fphttpserver, httpdefs, classes, strutils, fpjson, jsonparser, DateUtils, config, auth;
+  SysUtils, fphttpapp, fphttpserver, httpdefs, classes, strutils, fpjson, jsonparser, DateUtils, config, auth, storage;
 
 procedure StartServer(const Conf: TAppConfig);
 
 implementation
 
 type
-  TDBMap = class(TStringList)
-  public
+  TDBStorage = class
+    Storage: TStorage;
     destructor Destroy; override;
   end;
 
   TSimpleServer = class(TFPHTTPServer)
   private
-    FDBs: TStringList; // name -> TDBMap
+    FDBs: TStringList; // name -> TDBStorage
     FConfig: TAppConfig;
-    function GetDB(const DBName: string): TDBMap;
+    function GetDB(const DBName: string): TDBStorage;
     function FindDBConfig(const DBName: string): TDatabaseConfig;
   public
     constructor Create(AOwner: TComponent; const Conf: TAppConfig); reintroduce;
@@ -28,8 +28,9 @@ type
     procedure HandleRequest(Sender: TObject; var ARequest: TFPHTTPConnectionRequest; var AResponse: TFPHTTPConnectionResponse);
   end;
 
-destructor TDBMap.Destroy;
+destructor TDBStorage.Destroy;
 begin
+  StorageClose(Storage);
   inherited Destroy;
 end;
 
@@ -47,17 +48,26 @@ begin
   inherited Destroy;
 end;
 
-function TSimpleServer.GetDB(const DBName: string): TDBMap;
+function TSimpleServer.GetDB(const DBName: string): TDBStorage;
 var idx: Integer;
+    dbFile, datFile: string;
+    dbStorage: TDBStorage;
+    dbConfig: TDatabaseConfig;
 begin
   idx := FDBs.IndexOf(DBName);
   if idx < 0 then
   begin
-    Result := TDBMap.Create;
-    FDBs.AddObject(DBName, Result);
+    dbConfig := FindDBConfig(DBName);
+    dbFile := dbConfig.Path;
+    datFile := ChangeFileExt(dbFile, '.dat');
+    dbStorage := TDBStorage.Create;
+    if not StorageOpen(dbStorage.Storage, dbFile, datFile) then
+      raise Exception.Create('Cannot open storage for DB: ' + DBName);
+    FDBs.AddObject(DBName, dbStorage);
+    Result := dbStorage;
   end
   else
-    Result := TDBMap(FDBs.Objects[idx]);
+    Result := TDBStorage(FDBs.Objects[idx]);
 end;
 
 function TSimpleServer.FindDBConfig(const DBName: string): TDatabaseConfig;
@@ -91,15 +101,31 @@ begin
   WriteLn('[', LogTimestamp, '] [ERROR] ', S);
 end;
 
+function BytesToString(const Bytes: TByteArray): string;
+begin
+  SetString(Result, PAnsiChar(@Bytes[0]), Length(Bytes));
+end;
+
+function StringToBytes(const S: string): TByteArray;
+var
+  i: Integer;
+begin
+  SetLength(Result, Length(S));
+  for i := 1 to Length(S) do
+    Result[i-1] := Byte(S[i]);
+end;
+
 procedure TSimpleServer.HandleRequest(Sender: TObject; var ARequest: TFPHTTPConnectionRequest; var AResponse: TFPHTTPConnectionResponse);
 var
   Path, DBName, Key, Value, Token, Action: string;
-  DB: TDBMap;
+  DB: TDBStorage;
   i, slashPos: Integer;
   JSONData: TJSONData;
   JSONObject: TJSONObject;
   Password, JWT: string;
   DBConf: TDatabaseConfig;
+  keyBytes, valueBytes: TByteArray;
+  keys: TByteArrayDynArray;
 begin
   Path := ARequest.URI;
   if AnsiStartsStr('/db/', Path) then
@@ -161,7 +187,13 @@ begin
         WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
         Exit;
       end;
-      DB.Values[Key] := Value;
+      keyBytes := StringToBytes(Key);
+      valueBytes := StringToBytes(Value);
+      if not StorageSet(DB.Storage, keyBytes, Length(keyBytes), valueBytes) then
+      begin
+        WriteJSONResponse(AResponse, 500, '{"error":"Set failed"}');
+        Exit;
+      end;
       LogInfo('SET ' + DBName + ': ' + Key + ' = ' + Value);
       WriteJSONResponse(AResponse, 200, '{"result":"ok"}');
       Exit;
@@ -175,13 +207,14 @@ begin
         WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
         Exit;
       end;
-      if DB.IndexOfName(Key) < 0 then
+      keyBytes := StringToBytes(Key);
+      if not StorageGet(DB.Storage, keyBytes, Length(keyBytes), valueBytes) then
       begin
         LogError('Not found: ' + Key + ' in ' + DBName);
         WriteJSONResponse(AResponse, 404, '{"error":"Not found"}');
         Exit;
       end;
-      Value := DB.Values[Key];
+      Value := BytesToString(valueBytes);
       LogInfo('GET ' + DBName + ': ' + Key + ' = ' + Value);
       WriteJSONResponse(AResponse, 200, Format('{"key":"%s","value":"%s"}', [Key, Value]));
       Exit;
@@ -195,13 +228,13 @@ begin
         WriteJSONResponse(AResponse, 400, '{"error":"Bad request"}');
         Exit;
       end;
-      if DB.IndexOfName(Key) < 0 then
+      keyBytes := StringToBytes(Key);
+      if not StorageDelete(DB.Storage, keyBytes, Length(keyBytes)) then
       begin
         LogError('Not found (del): ' + Key + ' in ' + DBName);
         WriteJSONResponse(AResponse, 404, '{"error":"Not found"}');
         Exit;
       end;
-      DB.Delete(DB.IndexOfName(Key));
       LogInfo('DEL ' + DBName + ': ' + Key);
       WriteJSONResponse(AResponse, 200, '{"result":"deleted"}');
       Exit;
@@ -209,20 +242,21 @@ begin
     else if AnsiStartsStr('/list', Action) and (ARequest.Method = 'GET') then
     begin
       LogInfo('LIST ' + DBName);
+      keys := StorageList(DB.Storage);
       AResponse.ContentType := 'application/json';
       AResponse.Code := 200;
       AResponse.Content := '{"keys":[';
-      for i := 0 to DB.Count - 1 do
+      for i := 0 to High(keys) do
       begin
         if i > 0 then AResponse.Content := AResponse.Content + ',';
-        AResponse.Content := AResponse.Content + '"' + DB.Names[i] + '"';
+        AResponse.Content := AResponse.Content + '"' + BytesToString(keys[i]) + '"';
       end;
       AResponse.Content := AResponse.Content + ']}';
       Exit;
     end
     else if AnsiStartsStr('/clear', Action) and (ARequest.Method = 'POST') then
     begin
-      DB.Clear;
+      StorageClear(DB.Storage);
       LogInfo('CLEAR ' + DBName);
       WriteJSONResponse(AResponse, 200, '{"result":"cleared"}');
       Exit;

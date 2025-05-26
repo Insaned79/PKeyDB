@@ -48,6 +48,22 @@ curl -s -X GET "$SERVER_URL/db/$DBNAME/get?key=$KEY" \
   -H "X-Auth-Token: $TOKEN"
 echo
 
+# 3.5 Проверка сохранения после перезапуска сервера
+echo "== PERSISTENCE TEST: сохраняется ли значение после перезапуска сервера? =="
+echo "Остановите сервер сейчас (Ctrl+C в другом терминале), затем нажмите Enter для продолжения..."
+read
+
+echo "Ждём 3 секунды для имитации простоя..."
+sleep 3
+
+echo "Запустите сервер снова, затем нажмите Enter для продолжения..."
+read
+
+echo "== GET (valid token) после перезапуска =="
+curl -s -X GET "$SERVER_URL/db/$DBNAME/get?key=$KEY" \
+  -H "X-Auth-Token: $TOKEN"
+echo
+
 # 4. Список ключей
 echo "== LIST (valid token) =="
 curl -s -X GET "$SERVER_URL/db/$DBNAME/list" \
